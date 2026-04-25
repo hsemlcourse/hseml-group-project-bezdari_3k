@@ -1,86 +1,89 @@
 [![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/kOqwghv0)
-# ML Project — [Название проекта]
+# ML Project - Home Credit Default Risk
 
-**Студент:** [ФИО / Student ID]
+**Студент:** [Карагюлян Армен Андраникович и Лепехов Александр Александрович]
 
-**Группа:** [Группа]
-
-
-## Оглавление
-
-1. [Описание задачи](#описание-задачи)
-2. [Структура репозитория](#структура-репозитория)
-3. [Запуски](#быстрый-старт)
-4. [Данные](#данные)
-5. [Результаты](#результаты)
-7. [Отчёт](#отчёт)
-
+**Группа:** [БИВ 232]
 
 ## Описание задачи
 
-<!-- Кратко опишите задачу: что предсказываем, какой датасет, метрика качества -->
+**Задача:** бинарная классификация кредитного риска.
 
-**Задача:** [Классификация / Регрессия / Кластеризация / ...]
+**Что предсказываем:** вероятность того, что клиент Home Credit не вернёт кредит (`TARGET = 1`).
 
-**Датасет:** [Название и источник датасета]
+**Датасет:** Kaggle, [Home Credit Default Risk Feature Tools](https://www.kaggle.com/datasets/willkoehrsen/home-credit-default-risk-feature-tools?select=correlations.csv).
 
-**Целевая метрика:** [Accuracy / F1 / RMSE / ...]
+**Основная метрика:** ROC-AUC. Она подходит для несбалансированной классификации и совпадает с логикой Kaggle-соревнования. Дополнительно считаются Average Precision, F1, precision, recall и accuracy.
 
+## Что такое CP1
+
+CP1 в этом проекте закрывает две большие части:
+
+- обработка и подготовка данных: описание источника, очистка, пропуски, дубли, выбросы, feature engineering, визуализации, корректный split и метрики;
+- моделирование и эксперименты: baseline, несколько моделей, подбор гиперпараметров на уровне разумных конфигураций, уменьшение размерности и ансамбль.
+
+## Данные
+
+В папке `data/` лежат 9 CSV из Kaggle. Это не сырые таблицы Home Credit, а уже подготовленные Featuretools-файлы:
+
+- `feature_matrix.csv`, `feature_matrix_advanced.csv`, `feature_matrix_article.csv`, `feature_matrix_spec.csv` - признаковые матрицы;
+- `feature_importances.csv`, `fi_fma.csv`, `spec_feature_importances_ohe.csv` - важности признаков;
+- `correlations.csv`, `correlations_spec.csv` - корреляционные матрицы для анализа, не обучающие данные.
+
+Для основного CP1-пайплайна используется `data/feature_matrix_spec.csv`: это более компактная матрица с `356255` строками и `885` столбцами. Строки с `TARGET = -999` являются Kaggle test set без разметки, поэтому они исключаются из supervised-обучения.
 
 ## Структура репозитория
-Опишите структуру проекта, сохранив при этом верхнеуровневые папки. Можно добавить новые при необходимости.
-```
+
+```text
 .
-├── data
-│   ├── processed               # Очищенные и обработанные данные
-│   └── raw                     # Исходные файлы
-├── models                      # Сохранённые модели 
-├── notebooks
-│   ├── 01_eda.ipynb            # EDA
-│   ├── 02_baseline.ipynb       # Baseline-модель
-│   └── 03_experiments.ipynb    # Эксперименты и ablation study
-├── presentation                # Презентация для защиты
+├── data                         # CSV из Kaggle
+├── models                       # Результаты экспериментов и best_model.joblib
+├── presentation                 # Материалы для защиты
 ├── report
-│   ├── images                  # Изображения для отчёта
-│   └── report.md               # Финальный отчёт
+│   ├── data_quality             # Таблицы качества данных
+│   ├── images                   # EDA-графики
+│   ├── data_quality_report.md   # Data quality report
+│   └── report.md                # Отчёт CP1
 ├── src
-│   ├── preprocessing.py        # Предобработка данных
-│   └── modeling.py             # Обучение и оценка моделей
+│   ├── data_quality.py          # Анализ пропусков, типов, дублей, выбросов
+│   ├── eda.py                   # Генерация графиков
+│   ├── modeling.py              # Baseline, модели, ансамбль, метрики
+│   └── preprocessing.py         # Очистка, split, feature engineering
 ├── tests
-│   └── test.py                 # Тесты пайплайна
+│   └── test_pipeline.py         # Тесты пайплайна
 ├── requirements.txt
 └── README.md
 ```
 
 ## Запуск
 
-Этот блок замените способом запуска вашего сервиса.
 ```bash
-# 1. Клонировать репозиторий
-git clone <url>
-cd <repo-name>
-
-# 2. Создать виртуальное окружение
 python -m venv .venv
-source .venv/bin/activate   # Linux/macOS
-# .venv\Scripts\activate    # Windows
-
-# 3. Установить зависимости
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Данные
-- `data/raw/` — исходные файлы
-- `data/processed/` — предобработанные данные
+Быстрый smoke-run на небольшом сэмпле:
 
+```bash
+python -m src.data_quality
+python -m src.eda --sample-size 5000 --top-n-features 40
+python -m src.modeling --sample-size 5000 --top-n-features 40 --quick
+```
+
+Основной запуск CP1:
+
+```bash
+python -m src.data_quality --top-n-features 120
+python -m src.eda --sample-size 50000 --top-n-features 120
+python -m src.modeling --sample-size 50000 --top-n-features 120
+```
 
 ## Результаты
-Здесь коротко выпишите результаты.
-| Модель | [Метрика 1] | [Метрика 2] | Примечание |
-|--------|-------------|-------------|------------|
-| Baseline | — | — | |
-| Лучшая модель | — | — | |
 
+После запуска `src.modeling` таблица экспериментов сохраняется в `models/experiment_results.csv`, а лучшая модель - в `models/best_model.joblib`.
+
+Data quality report сохраняется в [`report/data_quality_report.md`](report/data_quality_report.md), а подробные таблицы - в `report/data_quality/`.
 
 ## Отчёт
 

@@ -1,0 +1,7 @@
+{
+  "data_path": "data\\feature_matrix_spec.csv",
+  "importance_path": "data\\spec_feature_importances_ohe.csv",
+  "rows": 356255,
+  "columns": 885,
+  "top_n_features": 120
+}
