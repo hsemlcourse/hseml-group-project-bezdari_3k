@@ -11,7 +11,17 @@ import requests
 import streamlit as st
 
 from src.ui.explanations import build_risk_drivers
-from src.ui.formatting import format_probability, get_recommendation, risk_tone
+from src.ui.formatting import format_probability, risk_tone
+from src.ui.i18n import (
+    LANGUAGE_LABELS,
+    language_code_from_label,
+    localized_recommendation,
+    localize_risk_tone,
+    page_options,
+    text,
+    translate_driver,
+    translate_option,
+)
 from src.ui.payload import build_feature_payload
 
 
@@ -22,18 +32,10 @@ IMAGE_DIR = REPORT_DIR / "images"
 EXPERIMENTS_PATH = ROOT_DIR / "models" / "experiment_results.csv"
 FEATURES_PATH = REPORT_DIR / "data_quality" / "selected_features.csv"
 
-PAGE_OPTIONS = {
-    "🏠 Overview": "Overview",
-    "👤 Single Client Scoring": "Single Client Scoring",
-    "📁 Batch Scoring": "Batch Scoring",
-    "📊 Data Explorer": "Data Explorer",
-    "🧠 Model Explainability": "Model Explainability",
-    "⚙️ Model Performance": "Model Performance",
-}
-
 CLIENT_DEFAULTS = {
     "age_years": 35,
     "gender": "M",
+    "contract_type": "Cash loans",
     "education_type": "Secondary / secondary special",
     "family_status": "Single / not married",
     "income_type": "Working",
@@ -418,6 +420,7 @@ def post_json(url: str, payload: dict[str, Any], timeout: float = 8.0) -> tuple[
     return data, None
 
 
+@st.cache_data(show_spinner=False)
 def load_experiment_results() -> pd.DataFrame:
     """Load committed experiment table if available."""
 
@@ -426,6 +429,7 @@ def load_experiment_results() -> pd.DataFrame:
     return pd.read_csv(EXPERIMENTS_PATH)
 
 
+@st.cache_data(show_spinner=False)
 def load_selected_features() -> pd.DataFrame:
     """Load selected feature importance table if available."""
 
@@ -443,41 +447,70 @@ def best_model_row() -> pd.Series | None:
     return results.sort_values("test_roc_auc", ascending=False).iloc[0]
 
 
-def render_sidebar(default_api_base_url: str) -> tuple[str, str, dict[str, Any] | None]:
+@st.cache_data(show_spinner=False)
+def load_missing_values_preview() -> pd.DataFrame:
+    """Load missing-values preview table for the data explorer page."""
+
+    missing_path = REPORT_DIR / "data_quality" / "missing_values.csv"
+    if not missing_path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(missing_path).head(20)
+
+
+def render_sidebar(default_api_base_url: str) -> tuple[str, str, dict[str, Any] | None, str]:
     """Render sidebar navigation and model status."""
 
     with st.sidebar:
+        language_label = st.selectbox("Language / Язык", list(LANGUAGE_LABELS.values()), key="ui_language_label")
+        lang = language_code_from_label(language_label)
+        nav_options = page_options(lang)
+        page_labels_by_key = {page_key: label for label, page_key in nav_options.items()}
+
         st.markdown(
-            """
+            f"""
             <div class="brand-row">
                 <div class="brand-mark">HC</div>
                 <div>
                     <div class="brand-title">Home Credit<br>Risk Scoring</div>
-                    <div class="brand-caption">Bank analyst dashboard</div>
+                    <div class="brand-caption">{text(lang, "sidebar.brand_caption")}</div>
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        selected_page = st.radio("Navigation", list(PAGE_OPTIONS), label_visibility="collapsed")
-        page = PAGE_OPTIONS[selected_page]
+        page = st.radio(
+            text(lang, "sidebar.navigation"),
+            list(page_labels_by_key),
+            format_func=page_labels_by_key.__getitem__,
+            key="selected_page_key",
+            label_visibility="collapsed",
+        )
         st.divider()
-        api_base_url = normalize_api_url(st.text_input("API base URL", value=default_api_base_url))
+        api_base_url = normalize_api_url(st.text_input(text(lang, "sidebar.api_base_url"), value=default_api_base_url))
         health, health_error = get_json(f"{api_base_url}/health")
 
-        st.markdown("#### API Health")
+        st.markdown(f"#### {text(lang, 'sidebar.api_health')}")
         if health_error:
-            st.markdown('<span class="status-chip status-error">API unavailable</span>', unsafe_allow_html=True)
+            st.markdown(
+                f'<span class="status-chip status-error">{text(lang, "sidebar.api_unavailable")}</span>',
+                unsafe_allow_html=True,
+            )
             st.caption(health_error)
         elif health and health.get("model_loaded"):
-            st.markdown('<span class="status-chip status-ok">Model loaded</span>', unsafe_allow_html=True)
+            st.markdown(
+                f'<span class="status-chip status-ok">{text(lang, "sidebar.model_loaded")}</span>',
+                unsafe_allow_html=True,
+            )
             st.caption(str(health.get("detail", "")))
         else:
-            st.markdown('<span class="status-chip status-warn">Model missing</span>', unsafe_allow_html=True)
-            st.caption(str((health or {}).get("detail", "Model artifact is not available.")))
+            st.markdown(
+                f'<span class="status-chip status-warn">{text(lang, "sidebar.model_missing")}</span>',
+                unsafe_allow_html=True,
+            )
+            st.caption(str((health or {}).get("detail", text(lang, "sidebar.model_missing_detail"))))
 
-        st.link_button("Open Swagger", f"{api_base_url}/docs", width="stretch")
-        return page, api_base_url, health
+        st.link_button(text(lang, "sidebar.open_swagger"), f"{api_base_url}/docs", width="stretch")
+        return page, api_base_url, health, lang
 
 
 def render_header(title: str, subtitle: str) -> None:
@@ -494,33 +527,33 @@ def render_header(title: str, subtitle: str) -> None:
     )
 
 
-def render_overview() -> None:
+def render_overview(lang: str) -> None:
     """Overview dashboard page."""
 
-    render_header("Home Credit Default Risk", "Decision-support tool for credit risk analysts.")
+    render_header(text(lang, "page.overview.title"), text(lang, "page.overview.subtitle"))
     best = best_model_row()
     auc_value = f"{float(best['test_roc_auc']):.3f}" if best is not None else "n/a"
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Applications", "307,511")
-    col2.metric("Default Rate", "8.1%")
-    col3.metric("Model AUC", auc_value)
-    col4.metric("Current Threshold", "0.35")
+    col1.metric(text(lang, "overview.total_applications"), "307,511")
+    col2.metric(text(lang, "overview.default_rate"), "8.1%")
+    col3.metric(text(lang, "overview.model_auc"), auc_value)
+    col4.metric(text(lang, "overview.threshold"), "0.35")
 
     left, right = st.columns([1.25, 0.75], gap="large")
     with left:
         with st.container(border=True):
-            st.markdown("### Project Goal")
-            st.write(
-                "This dashboard estimates the probability that a client may have difficulty repaying a loan. "
-                "The output is decision support for analysts, not an automatic credit decision."
+            st.markdown(f"### {text(lang, 'overview.project_goal')}")
+            st.write(text(lang, "overview.project_goal_text"))
+            st.markdown(
+                f'<span class="status-chip status-warn">{text(lang, "overview.recommendation_review")}</span>',
+                unsafe_allow_html=True,
             )
-            st.markdown('<span class="status-chip status-warn">Recommendation: Review Required</span>', unsafe_allow_html=True)
     with right:
         with st.container(border=True):
-            st.markdown("### Data Scope")
-            st.write("Main application features are combined with historical credit signals from the Home Credit dataset.")
-            st.caption("TARGET: 0 means repaid, 1 means repayment difficulty.")
+            st.markdown(f"### {text(lang, 'overview.data_scope')}")
+            st.write(text(lang, "overview.data_scope_text"))
+            st.caption(text(lang, "overview.target_note"))
 
 
 def client_state_key(name: str) -> str:
@@ -549,27 +582,32 @@ def get_client_input_values() -> dict[str, object]:
     return {key: st.session_state[client_state_key(key)] for key in CLIENT_DEFAULTS}
 
 
-def collect_single_client_values() -> tuple[bool, dict[str, object]]:
+def collect_single_client_values(lang: str) -> tuple[bool, dict[str, object]]:
     """Render single-client scoring form."""
 
     ensure_client_state_defaults()
 
     preset_cols = st.columns([1, 1, 2.5])
     with preset_cols[0]:
-        if st.button("Standard profile", width="stretch"):
+        if st.button(text(lang, "single.standard_profile"), width="stretch"):
             apply_client_profile(CLIENT_DEFAULTS)
     with preset_cols[1]:
-        if st.button("Stressed profile", width="stretch"):
+        if st.button(text(lang, "single.stressed_profile"), width="stretch"):
             apply_client_profile(CLIENT_STRESSED_PROFILE)
 
-    st.markdown("#### Client Profile")
+    st.markdown(f"#### {text(lang, 'single.client_profile')}")
     profile_cols = st.columns(4)
     with profile_cols[0]:
-        st.slider("Age", 18, 75, key=client_state_key("age_years"))
-        st.selectbox("Gender", ["M", "F", "XNA"], key=client_state_key("gender"))
+        st.slider(text(lang, "field.age"), 18, 75, key=client_state_key("age_years"))
+        st.selectbox(
+            text(lang, "field.gender"),
+            ["M", "F", "XNA"],
+            key=client_state_key("gender"),
+            format_func=lambda option: translate_option(lang, option),
+        )
     with profile_cols[1]:
         st.selectbox(
-            "Education",
+            text(lang, "field.education"),
             [
                 "Secondary / secondary special",
                 "Higher education",
@@ -578,39 +616,67 @@ def collect_single_client_values() -> tuple[bool, dict[str, object]]:
                 "Academic degree",
             ],
             key=client_state_key("education_type"),
+            format_func=lambda option: translate_option(lang, option),
         )
         st.selectbox(
-            "Family Status",
+            text(lang, "field.family_status"),
             ["Single / not married", "Married", "Civil marriage", "Separated", "Widow"],
             key=client_state_key("family_status"),
+            format_func=lambda option: translate_option(lang, option),
         )
     with profile_cols[2]:
         st.selectbox(
-            "Income Type",
+            text(lang, "field.income_type"),
             ["Working", "Commercial associate", "Pensioner", "State servant", "Student"],
             key=client_state_key("income_type"),
+            format_func=lambda option: translate_option(lang, option),
         )
         st.selectbox(
-            "Occupation Type",
+            text(lang, "field.occupation_type"),
             ["Laborers", "Core staff", "Managers", "Sales staff", "Drivers", "Accountants", "Other"],
             key=client_state_key("occupation_type"),
+            format_func=lambda option: translate_option(lang, option),
         )
     with profile_cols[3]:
-        st.slider("Children Count", 0, 10, key=client_state_key("children_count"))
-        st.slider("Family Members", 1, 10, key=client_state_key("family_members"))
+        st.slider(text(lang, "field.children_count"), 0, 10, key=client_state_key("children_count"))
+        st.slider(text(lang, "field.family_members"), 1, 10, key=client_state_key("family_members"))
 
-    st.markdown("#### Loan Parameters")
+    st.markdown(f"#### {text(lang, 'single.loan_parameters')}")
+    contract_cols = st.columns([1, 3])
+    with contract_cols[0]:
+        st.selectbox(
+            text(lang, "field.contract_type"),
+            ["Cash loans", "Revolving loans"],
+            key=client_state_key("contract_type"),
+            format_func=lambda option: translate_option(lang, option),
+        )
+
     loan_cols = st.columns(4)
     with loan_cols[0]:
-        st.number_input("Total Income", min_value=0.0, step=10000.0, key=client_state_key("income_total"))
+        st.number_input(
+            text(lang, "field.total_income"),
+            min_value=0.0,
+            step=10000.0,
+            key=client_state_key("income_total"),
+        )
     with loan_cols[1]:
-        st.number_input("Credit Amount", min_value=0.0, step=10000.0, key=client_state_key("credit_amount"))
+        st.number_input(
+            text(lang, "field.credit_amount"),
+            min_value=0.0,
+            step=10000.0,
+            key=client_state_key("credit_amount"),
+        )
     with loan_cols[2]:
-        st.number_input("Annuity", min_value=0.0, step=1000.0, key=client_state_key("annuity_amount"))
+        st.number_input(text(lang, "field.annuity"), min_value=0.0, step=1000.0, key=client_state_key("annuity_amount"))
     with loan_cols[3]:
-        st.number_input("Goods Price", min_value=0.0, step=10000.0, key=client_state_key("goods_price"))
+        st.number_input(
+            text(lang, "field.goods_price"),
+            min_value=0.0,
+            step=10000.0,
+            key=client_state_key("goods_price"),
+        )
 
-    st.markdown("#### External Sources And Credit History")
+    st.markdown(f"#### {text(lang, 'single.external_history')}")
     history_cols = st.columns(4)
     with history_cols[0]:
         st.slider("EXT_SOURCE_1", 0.0, 1.0, step=0.01, key=client_state_key("ext_source_1"))
@@ -619,13 +685,18 @@ def collect_single_client_values() -> tuple[bool, dict[str, object]]:
     with history_cols[2]:
         st.slider("EXT_SOURCE_3", 0.0, 1.0, step=0.01, key=client_state_key("ext_source_3"))
     with history_cols[3]:
-        st.slider("Employment Years", 0, 45, key=client_state_key("employment_years"))
+        st.slider(text(lang, "field.employment_years"), 0, 45, key=client_state_key("employment_years"))
 
-    submitted = st.button("Calculate Risk", type="primary", width="stretch")
+    submitted = st.button(text(lang, "single.calculate"), type="primary", width="stretch")
     return submitted, get_client_input_values()
 
 
-def render_prediction_result(prediction: dict[str, Any] | None, error: str | None, values: dict[str, object]) -> None:
+def render_prediction_result(
+    prediction: dict[str, Any] | None,
+    error: str | None,
+    values: dict[str, object],
+    lang: str,
+) -> None:
     """Render result block for one applicant."""
 
     if error:
@@ -633,11 +704,11 @@ def render_prediction_result(prediction: dict[str, Any] | None, error: str | Non
         return
     if not prediction:
         st.markdown(
-            """
+            f"""
             <div class="result-panel">
-                <div class="result-label">Probability of Default</div>
-                <div class="probability">Waiting</div>
-                <div class="muted">Run scoring to calculate risk.</div>
+                <div class="result-label">{text(lang, "result.probability")}</div>
+                <div class="probability">{text(lang, "result.waiting")}</div>
+                <div class="muted">{text(lang, "result.waiting_hint")}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -646,14 +717,14 @@ def render_prediction_result(prediction: dict[str, Any] | None, error: str | Non
 
     probability = float(prediction["default_probability"])
     risk_level = str(prediction["risk_level"])
-    tone = risk_tone(risk_level)
-    recommendation = get_recommendation(risk_level)
+    tone = localize_risk_tone(lang, risk_level, risk_tone(risk_level))
+    recommendation = localized_recommendation(lang, risk_level)
     width = min(max(probability * 100, 0), 100)
 
     st.markdown(
         f"""
         <div class="result-panel">
-            <div class="result-label">Probability of Default</div>
+            <div class="result-label">{text(lang, "result.probability")}</div>
             <div class="probability">{format_probability(probability)}</div>
             <div class="risk-badge" style="color:{tone['color']}; background:{tone['background']}">
                 {tone['label']}
@@ -661,7 +732,7 @@ def render_prediction_result(prediction: dict[str, Any] | None, error: str | Non
             <div class="meter">
                 <div class="meter-fill" style="width:{width:.1f}%; background:{tone['color']}"></div>
             </div>
-            <p><strong>Recommendation:</strong> {recommendation}</p>
+            <p><strong>{text(lang, "result.recommendation")}:</strong> {recommendation}</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -670,37 +741,37 @@ def render_prediction_result(prediction: dict[str, Any] | None, error: str | Non
     drivers = build_risk_drivers(values)
     inc_col, dec_col = st.columns(2)
     with inc_col:
-        st.markdown('<div class="driver-box"><strong>Risk Increasing Factors</strong>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="driver-box"><strong>{text(lang, "result.increasing")}</strong>',
+            unsafe_allow_html=True,
+        )
         for item in drivers["increasing"]:
-            st.write(f"+ {item}")
+            st.write(f"+ {translate_driver(lang, item)}")
         st.markdown("</div>", unsafe_allow_html=True)
     with dec_col:
-        st.markdown('<div class="driver-box"><strong>Risk Reducing Factors</strong>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="driver-box"><strong>{text(lang, "result.reducing")}</strong>',
+            unsafe_allow_html=True,
+        )
         for item in drivers["reducing"]:
-            st.write(f"- {item}")
+            st.write(f"- {translate_driver(lang, item)}")
         st.markdown("</div>", unsafe_allow_html=True)
 
     missing_features = prediction.get("missing_features") or []
     extra_features = prediction.get("extra_features") or []
     if missing_features or extra_features:
-        with st.expander("Model input coverage", expanded=False):
+        with st.expander(text(lang, "result.coverage"), expanded=False):
             if missing_features:
-                st.caption(
-                    f"{len(missing_features)} historical features were not entered manually and were handled by "
-                    "the model preprocessing pipeline."
-                )
+                st.caption(text(lang, "result.missing_features").format(count=len(missing_features)))
             if extra_features:
-                st.caption(
-                    "These profile fields are displayed for analyst context but are not used by the current top-N "
-                    f"model: {', '.join(extra_features)}."
-                )
+                st.caption(text(lang, "result.extra_features").format(features=", ".join(extra_features)))
 
 
-def render_single_client(api_base_url: str) -> None:
+def render_single_client(api_base_url: str, lang: str) -> None:
     """Single-client scoring page."""
 
-    render_header("Single Client Scoring", "Estimate default probability for one applicant.")
-    submitted, values = collect_single_client_values()
+    render_header(text(lang, "page.single.title"), text(lang, "page.single.subtitle"))
+    submitted, values = collect_single_client_values(lang)
 
     if submitted:
         payload = {"features": build_feature_payload(values)}
@@ -713,33 +784,34 @@ def render_single_client(api_base_url: str) -> None:
         st.session_state.get("single_prediction"),
         st.session_state.get("single_error"),
         st.session_state.get("single_values", values),
+        lang,
     )
 
 
-def risk_level_from_probability(probability: float) -> str:
+def risk_level_from_probability(probability: float, lang: str = "en") -> str:
     """Map probability to display risk level."""
 
     if probability < 0.2:
-        return "Low"
+        return text(lang, "batch.low")
     if probability < 0.5:
-        return "Medium"
-    return "High"
+        return text(lang, "batch.medium")
+    return text(lang, "batch.high")
 
 
-def render_batch_scoring(api_base_url: str) -> None:
+def render_batch_scoring(api_base_url: str, lang: str) -> None:
     """CSV batch scoring page."""
 
-    render_header("Batch Scoring", "Upload applications CSV and score multiple clients.")
-    uploaded_file = st.file_uploader("Upload applications CSV", type=["csv"])
+    render_header(text(lang, "page.batch.title"), text(lang, "page.batch.subtitle"))
+    uploaded_file = st.file_uploader(text(lang, "batch.upload"), type=["csv"])
     if uploaded_file is None:
-        st.markdown('<div class="callout">Upload a CSV with Home Credit feature columns to run batch scoring.</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="callout">{text(lang, "batch.callout")}</div>', unsafe_allow_html=True)
         return
 
     frame = pd.read_csv(uploaded_file)
-    st.subheader("Preview")
+    st.subheader(text(lang, "batch.preview"))
     st.dataframe(frame.head(10), width="stretch")
 
-    if st.button("Run Batch Prediction", width="stretch"):
+    if st.button(text(lang, "batch.run"), width="stretch"):
         items = [{"features": build_feature_payload(row.dropna().to_dict())} for _, row in frame.iterrows()]
         response, error = post_json(f"{api_base_url}/predict-batch", {"items": items}, timeout=30.0)
         if error:
@@ -749,17 +821,21 @@ def render_batch_scoring(api_base_url: str) -> None:
             result = frame.copy()
             result["default_probability"] = [item["default_probability"] for item in predictions]
             result["risk_level"] = [
-                risk_level_from_probability(float(item["default_probability"])) for item in predictions
+                risk_level_from_probability(float(item["default_probability"]), lang) for item in predictions
             ]
             st.session_state["batch_result"] = result
 
     result = st.session_state.get("batch_result")
     if isinstance(result, pd.DataFrame):
-        st.subheader("Scoring Results")
+        st.subheader(text(lang, "batch.results"))
+        result = result.copy()
+        result["risk_level"] = [
+            risk_level_from_probability(float(probability), lang) for probability in result["default_probability"]
+        ]
         result_columns = [column for column in ["SK_ID_CURR", "default_probability", "risk_level"] if column in result.columns]
         st.dataframe(result[result_columns].head(30), width="stretch")
         st.download_button(
-            "Download predictions CSV",
+            text(lang, "batch.download"),
             data=result.to_csv(index=False).encode("utf-8"),
             file_name="home_credit_predictions.csv",
             mime="text/csv",
@@ -767,15 +843,15 @@ def render_batch_scoring(api_base_url: str) -> None:
         )
 
 
-def render_data_explorer() -> None:
+def render_data_explorer(lang: str) -> None:
     """Data explorer page based on committed report artifacts."""
 
-    render_header("Data Explorer", "Dataset quality, target balance and feature distributions.")
+    render_header(text(lang, "page.data.title"), text(lang, "page.data.subtitle"))
     images = [
-        ("Target distribution", "target_distribution.png"),
-        ("Top missing values", "missingness_top20.png"),
-        ("Credit-risk correlations", "target_correlations_top20.png"),
-        ("PCA projection", "pca_projection.png"),
+        (text(lang, "data.target_distribution"), "target_distribution.png"),
+        (text(lang, "data.top_missing_values"), "missingness_top20.png"),
+        (text(lang, "data.credit_risk_correlations"), "target_correlations_top20.png"),
+        (text(lang, "data.pca_projection"), "pca_projection.png"),
     ]
     first, second = st.columns(2)
     for index, (caption, filename) in enumerate(images):
@@ -784,50 +860,49 @@ def render_data_explorer() -> None:
             if path.exists():
                 st.image(str(path), caption=caption, width="stretch")
             else:
-                st.warning(f"Missing artifact: {path}")
+                st.warning(text(lang, "data.missing_artifact").format(path=path))
 
-    missing_path = REPORT_DIR / "data_quality" / "missing_values.csv"
-    if missing_path.exists():
-        st.subheader("Missing Values Table")
-        missing = pd.read_csv(missing_path).head(20)
+    missing = load_missing_values_preview()
+    if not missing.empty:
+        st.subheader(text(lang, "data.missing_values_table"))
         st.dataframe(missing, width="stretch")
 
 
-def render_model_explainability() -> None:
+def render_model_explainability(lang: str) -> None:
     """Model explainability page."""
 
-    render_header("Model Explainability", "Global feature importance and local explanation language.")
+    render_header(text(lang, "page.explain.title"), text(lang, "page.explain.subtitle"))
     features = load_selected_features()
     if features.empty:
-        st.warning("Feature importance artifact is not available.")
+        st.warning(text(lang, "explain.feature_unavailable"))
     else:
         top = features.head(20)
-        st.subheader("Global Feature Importance")
+        st.subheader(text(lang, "explain.global_importance"))
         st.bar_chart(top.set_index("feature")["importance"], horizontal=True)
         st.dataframe(top[["rank", "feature", "importance"]], width="stretch")
 
     left, right = st.columns(2)
     with left:
         with st.container(border=True):
-            st.markdown("### Risk Increasing Factors")
-            st.write("+ Low EXT_SOURCE_2 increases risk")
-            st.write("+ High annuity / income ratio increases risk")
-            st.write("+ High credit / income ratio increases risk")
+            st.markdown(f"### {text(lang, 'result.increasing')}")
+            st.write(f"+ {translate_driver(lang, 'Low EXT_SOURCE_2 increases risk')}")
+            st.write(f"+ {translate_driver(lang, 'High annuity / income ratio increases risk')}")
+            st.write(f"+ {translate_driver(lang, 'High credit / income ratio increases risk')}")
     with right:
         with st.container(border=True):
-            st.markdown("### Risk Reducing Factors")
-            st.write("- Strong external score decreases risk")
-            st.write("- Stable employment decreases risk")
-            st.write("- Moderate annuity burden decreases risk")
+            st.markdown(f"### {text(lang, 'result.reducing')}")
+            st.write(f"- {translate_driver(lang, 'Strong external score decreases risk')}")
+            st.write(f"- {translate_driver(lang, 'Stable employment decreases risk')}")
+            st.write(f"- {translate_driver(lang, 'Moderate annuity burden decreases risk')}")
 
 
-def render_model_performance() -> None:
+def render_model_performance(lang: str) -> None:
     """Model performance page."""
 
-    render_header("Model Performance", "Experiment metrics and threshold review panel.")
+    render_header(text(lang, "page.performance.title"), text(lang, "page.performance.subtitle"))
     results = load_experiment_results()
     if results.empty:
-        st.warning("Experiment results are not available.")
+        st.warning(text(lang, "performance.results_unavailable"))
         return
 
     best = results.sort_values("test_roc_auc", ascending=False).iloc[0]
@@ -837,7 +912,7 @@ def render_model_performance() -> None:
     col3.metric("Recall", f"{best['test_recall']:.3f}")
     col4.metric("F1-score", f"{best['test_f1']:.3f}")
 
-    st.subheader("Experiment Table")
+    st.subheader(text(lang, "performance.experiment_table"))
     display_columns = [
         "model",
         "test_roc_auc",
@@ -849,14 +924,13 @@ def render_model_performance() -> None:
     ]
     st.dataframe(results[display_columns], width="stretch")
 
-    st.subheader("Threshold Analysis")
-    threshold = st.slider("Decision threshold", 0.05, 0.80, 0.35, 0.01)
+    st.subheader(text(lang, "performance.threshold_analysis"))
+    threshold = st.slider(text(lang, "performance.decision_threshold"), 0.05, 0.80, 0.35, 0.01)
     st.markdown(
         f"""
         <div class="callout">
-            <strong>Current threshold: {threshold:.2f}</strong><br>
-            The committed experiment table stores aggregate metrics at the model evaluation threshold.
-            The slider is included for analyst review workflow; exact threshold curves require saved validation probabilities.
+            <strong>{text(lang, "performance.current_threshold")}: {threshold:.2f}</strong><br>
+            {text(lang, "performance.threshold_text")}
         </div>
         """,
         unsafe_allow_html=True,
@@ -873,20 +947,20 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
     inject_css()
-    page, api_base_url, _ = render_sidebar(os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL))
+    page, api_base_url, _, lang = render_sidebar(os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL))
 
-    if page == "Overview":
-        render_overview()
-    elif page == "Single Client Scoring":
-        render_single_client(api_base_url)
-    elif page == "Batch Scoring":
-        render_batch_scoring(api_base_url)
-    elif page == "Data Explorer":
-        render_data_explorer()
-    elif page == "Model Explainability":
-        render_model_explainability()
-    elif page == "Model Performance":
-        render_model_performance()
+    if page == "overview":
+        render_overview(lang)
+    elif page == "single_client":
+        render_single_client(api_base_url, lang)
+    elif page == "batch_scoring":
+        render_batch_scoring(api_base_url, lang)
+    elif page == "data_explorer":
+        render_data_explorer(lang)
+    elif page == "model_explainability":
+        render_model_explainability(lang)
+    elif page == "model_performance":
+        render_model_performance(lang)
 
 
 if __name__ == "__main__":

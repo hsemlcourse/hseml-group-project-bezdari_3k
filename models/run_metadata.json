@@ -5,5 +5,5 @@
   "sample_size": 50000,
   "random_state": 42,
   "best_model": "hist_gradient_boosting",
-  "best_test_roc_auc": 0.7783004812446437
+  "best_test_roc_auc": 0.7817225321978436
 }

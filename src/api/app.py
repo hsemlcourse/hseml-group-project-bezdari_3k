@@ -60,7 +60,8 @@ def create_app(service: Any | None = None) -> FastAPI:
     def predict_batch(request: BatchPredictionRequest) -> BatchPredictionResponse:
         try:
             predictions = [
-                PredictionResponse(**asdict(model_service.predict_one(item.features))) for item in request.items
+                PredictionResponse(**asdict(prediction))
+                for prediction in model_service.predict_many([item.features for item in request.items])
             ]
             return BatchPredictionResponse(predictions=predictions)
         except ModelArtifactMissingError as exc:

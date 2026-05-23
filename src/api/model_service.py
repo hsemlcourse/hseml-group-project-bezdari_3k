@@ -59,6 +59,7 @@ class CreditRiskModelService:
         self.metadata_path = Path(metadata_path or os.getenv("MODEL_METADATA_PATH", DEFAULT_METADATA_PATH))
         self._model = model
         self._metadata = metadata
+        self._expected_features: list[str] | None = None
 
     @classmethod
     def from_model(
@@ -112,18 +113,24 @@ class CreditRiskModelService:
     def expected_features(self) -> list[str]:
         """Return the feature order expected by the fitted sklearn pipeline."""
 
+        if self._expected_features is not None:
+            return self._expected_features
+
         model = self.load_model()
         direct_feature_names = self._normalise_feature_names(getattr(model, "feature_names_in_", []))
         if direct_feature_names:
-            return direct_feature_names
+            self._expected_features = direct_feature_names
+            return self._expected_features
 
         named_steps = getattr(model, "named_steps", {})
         for step in named_steps.values():
             step_feature_names = self._normalise_feature_names(getattr(step, "feature_names_in_", []))
             if step_feature_names:
-                return step_feature_names
+                self._expected_features = step_feature_names
+                return self._expected_features
 
-        return []
+        self._expected_features = []
+        return self._expected_features
 
     @staticmethod
     def _normalise_feature_names(feature_names: Any) -> list[str]:
@@ -146,32 +153,67 @@ class CreditRiskModelService:
     def predict_one(self, features: Mapping[str, Any]) -> PredictionResult:
         """Predict default probability for one applicant payload."""
 
+        return self.predict_many([features])[0]
+
+    def predict_many(self, feature_rows: list[Mapping[str, Any]]) -> list[PredictionResult]:
+        """Predict default probabilities for many applicants in one vectorized model call."""
+
+        if not feature_rows:
+            return []
+
         model = self.load_model()
         expected_features = self.expected_features()
-        frame, missing_features, extra_features = self._build_input_frame(features, expected_features)
-        probabilities = model.predict_proba(frame)
-        default_probability = float(probabilities[0][1])
-        metadata = self.load_metadata()
-
-        return PredictionResult(
-            default_probability=default_probability,
-            risk_level=get_risk_level(default_probability),
-            model_name=str(metadata.get("best_model") or metadata.get("model_name") or "unknown"),
-            missing_features=missing_features,
-            extra_features=extra_features,
+        frame, missing_features_by_row, extra_features_by_row = self._build_input_frame_many(
+            feature_rows,
+            expected_features,
         )
+        probabilities = model.predict_proba(frame)[:, 1]
+        metadata = self.load_metadata()
+        model_name = str(metadata.get("best_model") or metadata.get("model_name") or "unknown")
+
+        return [
+            PredictionResult(
+                default_probability=float(probability),
+                risk_level=get_risk_level(float(probability)),
+                model_name=model_name,
+                missing_features=missing_features_by_row[index],
+                extra_features=extra_features_by_row[index],
+            )
+            for index, probability in enumerate(probabilities)
+        ]
 
     @staticmethod
     def _build_input_frame(
         features: Mapping[str, Any],
         expected_features: list[str],
     ) -> tuple[pd.DataFrame, list[str], list[str]]:
-        feature_dict = dict(features)
-        expanded_features = add_domain_features(pd.DataFrame([feature_dict])).iloc[0].to_dict()
-        if not expected_features:
-            return pd.DataFrame([expanded_features]), [], []
+        frame, missing_features, extra_features = CreditRiskModelService._build_input_frame_many(
+            [features],
+            expected_features,
+        )
+        return frame, missing_features[0], extra_features[0]
 
-        missing_features = [feature for feature in expected_features if feature not in expanded_features]
-        extra_features = sorted(feature for feature in feature_dict if feature not in expected_features)
-        aligned = {feature: expanded_features.get(feature) for feature in expected_features}
-        return pd.DataFrame([aligned], columns=expected_features), missing_features, extra_features
+    @staticmethod
+    def _build_input_frame_many(
+        feature_rows: list[Mapping[str, Any]],
+        expected_features: list[str],
+    ) -> tuple[pd.DataFrame, list[list[str]], list[list[str]]]:
+        feature_dicts = [dict(features) for features in feature_rows]
+        expanded_frame = add_domain_features(pd.DataFrame(feature_dicts))
+        if not expected_features:
+            return expanded_frame, [[] for _ in feature_dicts], [[] for _ in feature_dicts]
+
+        expanded_records = expanded_frame.to_dict(orient="records")
+        missing_features_by_row = [
+            [feature for feature in expected_features if feature not in expanded_features]
+            for expanded_features in expanded_records
+        ]
+        extra_features_by_row = [
+            sorted(feature for feature in feature_dict if feature not in expected_features)
+            for feature_dict in feature_dicts
+        ]
+        aligned_records = [
+            {feature: expanded_features.get(feature) for feature in expected_features}
+            for expanded_features in expanded_records
+        ]
+        return pd.DataFrame(aligned_records, columns=expected_features), missing_features_by_row, extra_features_by_row

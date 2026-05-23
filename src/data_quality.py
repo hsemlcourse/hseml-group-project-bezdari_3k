@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.preprocessing import ID_COLUMN, TARGET_COLUMN, clean_target, load_top_features
+from src.preprocessing import ID_COLUMN, REQUIRED_MODEL_INPUTS, TARGET_COLUMN, clean_target, load_top_features, resolve_raw_feature_name
 
 
 @dataclass(frozen=True)
@@ -83,10 +83,21 @@ def get_selected_features(config: DataQualityConfig) -> pd.DataFrame:
         data_path=config.data_path,
         importance_path=config.importance_path,
         top_n=config.top_n_features,
+        extra_features=REQUIRED_MODEL_INPUTS,
     )
+    available_columns = set(pd.read_csv(config.data_path, nrows=0).columns)
     importances = pd.read_csv(config.importance_path)
+    importances["raw_feature"] = importances["feature"].astype(str).map(
+        lambda feature: resolve_raw_feature_name(feature, available_columns)
+    )
+    raw_importances = (
+        importances.dropna(subset=["raw_feature"])
+        .groupby("raw_feature", as_index=False)["importance"]
+        .max()
+        .rename(columns={"raw_feature": "feature"})
+    )
     selected = pd.DataFrame({"feature": features})
-    selected = selected.merge(importances[["feature", "importance"]], on="feature", how="left")
+    selected = selected.merge(raw_importances, on="feature", how="left")
     selected.insert(0, "rank", range(1, len(selected) + 1))
     return selected
 

@@ -33,6 +33,26 @@ class FakeService:
             extra_features=sorted(set(features) - {"AMT_CREDIT", "AMT_INCOME_TOTAL"}),
         )
 
+    def predict_many(self, feature_rows):
+        return [self.predict_one(features) for features in feature_rows]
+
+
+class VectorizedOnlyService(FakeService):
+    def predict_one(self, features):
+        raise AssertionError("predict-batch should use predict_many, not predict_one in a loop")
+
+    def predict_many(self, feature_rows):
+        return [
+            PredictionResult(
+                default_probability=0.11 + index,
+                risk_level="low" if index == 0 else "high",
+                model_name="fake_model",
+                missing_features=[],
+                extra_features=[],
+            )
+            for index, _ in enumerate(feature_rows)
+        ]
+
 
 class MissingModelService(FakeService):
     def is_loaded(self):
@@ -92,6 +112,23 @@ def test_predict_batch_returns_predictions():
 
     assert response.status_code == 200
     assert len(response.json()["predictions"]) == 2
+
+
+def test_predict_batch_uses_vectorized_service_method():
+    client = TestClient(create_app(VectorizedOnlyService()))
+
+    response = client.post(
+        "/predict-batch",
+        json={
+            "items": [
+                {"features": {"AMT_CREDIT": 100000.0}},
+                {"features": {"AMT_CREDIT": 200000.0}},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert [item["default_probability"] for item in response.json()["predictions"]] == [0.11, 1.11]
 
 
 def test_predict_returns_503_when_model_is_missing():

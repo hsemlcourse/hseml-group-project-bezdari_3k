@@ -1,4 +1,5 @@
 from src.ui.payload import build_feature_payload
+from src.ui.streamlit_app import CLIENT_DEFAULTS
 
 
 def test_build_feature_payload_converts_user_friendly_fields():
@@ -83,3 +84,10 @@ def test_build_feature_payload_keeps_already_model_named_csv_fields():
     assert payload["AMT_CREDIT"] == 500000.0
     assert payload["AMT_INCOME_TOTAL"] == 150000.0
     assert payload["EXT_SOURCE_2"] == 0.42
+
+
+def test_single_client_defaults_include_contract_type_used_by_model():
+    payload = build_feature_payload(CLIENT_DEFAULTS)
+
+    assert CLIENT_DEFAULTS["contract_type"] == "Cash loans"
+    assert payload["NAME_CONTRACT_TYPE"] == "Cash loans"

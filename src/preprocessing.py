@@ -29,6 +29,19 @@ FEATURE_ENGINEERING_INPUTS = [
     "EXT_SOURCE_3",
 ]
 
+INTERACTIVE_INPUT_FEATURES = [
+    "CODE_GENDER",
+    "NAME_CONTRACT_TYPE",
+    "NAME_EDUCATION_TYPE",
+    "NAME_FAMILY_STATUS",
+    "NAME_INCOME_TYPE",
+    "OCCUPATION_TYPE",
+    "CNT_CHILDREN",
+    "CNT_FAM_MEMBERS",
+]
+
+REQUIRED_MODEL_INPUTS = list(dict.fromkeys([*FEATURE_ENGINEERING_INPUTS, *INTERACTIVE_INPUT_FEATURES]))
+
 
 @dataclass(frozen=True)
 class DataConfig:
@@ -103,17 +116,36 @@ def load_top_features(
 
     importances = pd.read_csv(importance_path)
     importances = importances.sort_values("importance", ascending=False)
-    ranked = [
-        feature
-        for feature in importances["feature"].astype(str)
-        if feature in available_columns and feature not in excluded
-    ]
+    ranked: list[str] = []
+    for feature in importances["feature"].astype(str):
+        raw_feature = resolve_raw_feature_name(feature, available_columns)
+        if raw_feature is None or raw_feature in excluded or raw_feature in ranked:
+            continue
+        ranked.append(raw_feature)
 
     selected = ranked[:top_n]
     for feature in extra_features:
         if feature in available_columns and feature not in selected and feature not in excluded:
             selected.append(feature)
     return selected
+
+
+def resolve_raw_feature_name(feature: str, available_columns: set[str]) -> str | None:
+    """Map an importance feature name to a raw feature-matrix column.
+
+    The Kaggle FeatureTools importance file contains one-hot names such as
+    ``NAME_EDUCATION_TYPE_Higher education`` while the matrix keeps the raw
+    categorical column ``NAME_EDUCATION_TYPE``. Matching by longest prefix keeps
+    those UI-visible categorical fields available for the sklearn pipeline.
+    """
+
+    if feature in available_columns:
+        return feature
+
+    for column in sorted(available_columns, key=len, reverse=True):
+        if feature.startswith(f"{column}_"):
+            return column
+    return None
 
 
 def load_training_frame(config: DataConfig) -> pd.DataFrame:
@@ -123,7 +155,7 @@ def load_training_frame(config: DataConfig) -> pd.DataFrame:
         data_path=config.data_path,
         importance_path=config.importance_path,
         top_n=config.top_n_features,
-        extra_features=FEATURE_ENGINEERING_INPUTS,
+        extra_features=REQUIRED_MODEL_INPUTS,
     )
     usecols = [ID_COLUMN, TARGET_COLUMN, *selected_features]
     frame = pd.read_csv(config.data_path, usecols=lambda column: column in usecols)

@@ -33,6 +33,10 @@
 
 Для основного пайплайна используется `data/feature_matrix_spec.csv`: это более компактная матрица с `356255` строками и `885` столбцами. Строки с `TARGET = -999` являются Kaggle test set без разметки, поэтому они исключаются из supervised-обучения.
 
+Feature selection берёт top-120 признаков по `spec_feature_importances_ohe.csv` и дополнительно сохраняет поля, видимые
+в Streamlit-форме клиента. Для one-hot importance вроде `NAME_EDUCATION_TYPE_Higher education` код маппит важность
+обратно в raw-колонку `NAME_EDUCATION_TYPE`, чтобы UI-поля реально попадали в модель.
+
 ### Загрузка данных Kaggle / FeatureTools
 
 Большие CSV не коммитятся в репозиторий. Для воспроизведения нужно скачать Kaggle dataset
@@ -188,6 +192,9 @@ Compose использует один образ `home-credit-risk-scoring:cp3` 
 - `api` запускает `uvicorn src.api.app:app`;
 - `streamlit` запускает `streamlit run src/ui/streamlit_app.py` и обращается к API по `http://api:8000`.
 
+Batch scoring в FastAPI выполняется векторизованно: сервис собирает один DataFrame и вызывает `predict_proba` один раз
+на весь CSV, а не делает цикл из одиночных предсказаний.
+
 Проверки:
 
 ```bash
@@ -202,9 +209,9 @@ Compose использует один образ `home-credit-risk-scoring:cp3` 
 Финальный запуск на `50000` строках и `120` top признаках:
 
 - best model: `hist_gradient_boosting`;
-- test ROC-AUC: `0.7783`;
-- test Average Precision: `0.2685`;
-- test F1: `0.0411`.
+- test ROC-AUC: `0.7817`;
+- test Average Precision: `0.2785`;
+- test F1: `0.0351`.
 
 Data quality report сохраняется в [`report/data_quality_report.md`](report/data_quality_report.md), а подробные таблицы - в `report/data_quality/`.
 
