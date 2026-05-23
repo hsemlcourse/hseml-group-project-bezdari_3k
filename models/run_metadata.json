@@ -1,9 +1,9 @@
 {
-  "data_path": "data\\feature_matrix_spec.csv",
-  "importance_path": "data\\spec_feature_importances_ohe.csv",
-  "top_n_features": 30,
-  "sample_size": 3000,
+  "data_path": "data/feature_matrix_spec.csv",
+  "importance_path": "data/spec_feature_importances_ohe.csv",
+  "top_n_features": 120,
+  "sample_size": 50000,
   "random_state": 42,
-  "best_model": "baseline_logistic_regression",
-  "best_test_roc_auc": 0.7353730542136339
+  "best_model": "hist_gradient_boosting",
+  "best_test_roc_auc": 0.7783004812446437
 }

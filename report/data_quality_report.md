@@ -1,6 +1,6 @@
 # Data Quality Report
 
-Основной файл анализа: `data\feature_matrix_spec.csv`.
+Основной файл анализа: `data/feature_matrix_spec.csv`.
 
 ## Краткий Вывод
 
@@ -38,7 +38,7 @@
 
 ## Пропуски
 
-Таблица ниже показывает признаки с максимальной долей пропусков. Полная таблица сохранена в `report\data_quality\missing_values.csv`.
+Таблица ниже показывает признаки с максимальной долей пропусков. Полная таблица сохранена в `report/data_quality/missing_values.csv`.
 
 | feature | missing_count | missing_share |
 | --- | --- | --- |
@@ -92,7 +92,7 @@
 
 ## Отбор Признаков
 
-Для воспроизводимости и экономии памяти модель читает top-N признаков из `data\spec_feature_importances_ohe.csv`. Полная таблица выбранных признаков сохранена в `report\data_quality\selected_features.csv`.
+Для воспроизводимости и экономии памяти модель читает top-N признаков из `data/spec_feature_importances_ohe.csv`. Полная таблица выбранных признаков сохранена в `report/data_quality/selected_features.csv`.
 
 | rank | feature | importance |
 | --- | --- | --- |

@@ -1,0 +1,42 @@
+services:
+  api:
+    build:
+      context: .
+    image: home-credit-risk-scoring:cp3
+    command: python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+    environment:
+      MODEL_PATH: /app/models/best_model.joblib
+      MODEL_METADATA_PATH: /app/models/run_metadata.json
+      PYTHONPATH: /app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models:ro
+      - ./report:/app/report:ro
+      - ./data:/app/data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  streamlit:
+    image: home-credit-risk-scoring:cp3
+    command: >
+      python -m streamlit run src/ui/streamlit_app.py
+      --server.address 0.0.0.0
+      --server.port 8501
+      --server.headless true
+    environment:
+      API_BASE_URL: http://api:8000
+      PYTHONPATH: /app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./models:/app/models:ro
+      - ./report:/app/report:ro
+      - ./data:/app/data:ro
+    depends_on:
+      api:
+        condition: service_healthy

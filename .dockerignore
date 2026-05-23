@@ -1,0 +1,32 @@
+.git/
+.github/
+.idea/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.cache/
+.DS_Store
+*.log
+*.tmp
+
+# Keep Docker build context small. The compose file mounts local data at runtime.
+data/*.csv
+data/raw/*.csv
+data/raw/*.json
+data/raw/*.parquet
+data/raw/*.xlsx
+data/raw/*.zip
+data/raw/*.tar.gz
+data/processed/*.csv
+data/processed/*.json
+data/processed/*.parquet
+
+# The final CP3 model is intentionally included in the image.
+models/*.pkl
+models/*.h5
+models/*.pt
+models/*.pth
+models/*.onnx

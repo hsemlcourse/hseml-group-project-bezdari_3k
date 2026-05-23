@@ -62,6 +62,7 @@ models/*.pt
 models/*.pth
 models/*.onnx
 !models/.gitkeep
+!models/best_model.joblib
 
 # =============================================================================
 # Reports — figures are regenerated, but keep CSV
